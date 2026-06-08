@@ -1,0 +1,8 @@
+# C# build files
+bin/
+obj/
+.vs/
+*.user
+
+# System files
+.DS_Store
