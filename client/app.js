@@ -1,6 +1,11 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
+const COLORS = {
+    permitted: '#4ecd74',
+    forbidden: '#ff6b6b'
+};
+
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
@@ -13,10 +18,157 @@ const core = {
     angle: 0, // New property to track rotation
 };
 
-const ring = {
-    radius: 80, // Distance from the center
-    color: '#ff00ff'
-};
+
+class Ring {
+    constructor(radius, speed, sectors) {
+        this.radius = radius;
+        this.speed = speed;
+        this.sectors = sectors; // Array of objects: { angle: 0, type: 'permitted' }
+        this.rotation = 0;
+    }
+
+    update() {
+        this.rotation += this.speed;
+    }
+
+    draw(ctx, coreX, coreY) {
+        this.sectors.forEach(sector => {
+            ctx.beginPath();
+            // We add this.rotation to the start/end angles to make it spin
+            ctx.arc(coreX, coreY, this.radius, 
+                    sector.startAngle + this.rotation, 
+                    sector.endAngle + this.rotation);
+            
+            // Pick color based on the type
+            ctx.strokeStyle = (sector.type === 'forbidden') ? COLORS.forbidden : COLORS.permitted;
+            ctx.lineWidth = 15; // Make the ring thick
+            ctx.stroke();
+            ctx.closePath();
+        });
+    }
+    checkCollision(ballX, ballY, coreX, coreY) {
+        const dx = ballX - coreX;
+        const dy = ballY - coreY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance <= this.radius + 15 && distance >= this.radius - 15) {
+            // Adjust for the coordinate system offset (Canvas Arc vs Math.atan2)
+            let ballAngle = Math.atan2(dy, dx) - Math.PI / 2;
+            
+            // Normalize angle to be between 0 and 2*PI
+            let relativeAngle = (ballAngle - this.rotation) % (Math.PI * 2);
+            if (relativeAngle < 0) relativeAngle += Math.PI * 2;
+
+            return this.sectors.find(s => relativeAngle >= s.startAngle && relativeAngle < s.endAngle);
+        }
+        return null;
+    }
+}
+
+// Define two rings
+const rings = [
+    // Ring with 2 sectors
+    (() => {
+        const slice = (Math.PI * 2) / 2;
+        return new Ring(80, 0.02, [
+            { startAngle: 0 * slice, endAngle: 1 * slice, type: 'permitted' },
+            { startAngle: 1 * slice, endAngle: 2 * slice, type: 'forbidden' },
+        ]);
+    })(),
+    // // Ring with 3 sectors
+    // (() => {
+    //     const slice = (Math.PI * 2) / 3;
+    //     return new Ring(120, -0.015, [
+    //         { startAngle: 0 * slice, endAngle: 1 * slice, type: 'permitted' },
+    //         { startAngle: 1 * slice, endAngle: 2 * slice, type: 'forbidden' },
+    //         { startAngle: 2 * slice, endAngle: 3 * slice, type: 'permitted' },
+    //     ]);
+    // })(),
+    // // Ring with 3 sectors
+    // (() => {
+    //     const slice = (Math.PI * 2) / 4;
+    //     return new Ring(160, -0.02, [
+    //         { startAngle: 0 * slice, endAngle: 1 * slice, type: 'permitted' },
+    //         { startAngle: 1 * slice, endAngle: 2 * slice, type: 'forbidden' },
+    //         { startAngle: 2 * slice, endAngle: 3 * slice, type: 'permitted' },
+    //         { startAngle: 3 * slice, endAngle: 4 * slice, type: 'forbidden' },
+    //     ]);
+    // })(),
+    // // Ring with 5 sectors
+    // (() => {
+    //     const slice = (Math.PI * 2) / 5;
+    //     return new Ring(200, 0.015, [
+    //         { startAngle: 0 * slice, endAngle: 1 * slice, type: 'forbidden' },
+    //         { startAngle: 1 * slice, endAngle: 2 * slice, type: 'permitted' },
+    //         { startAngle: 2 * slice, endAngle: 3 * slice, type: 'forbidden' },
+    //         { startAngle: 3 * slice, endAngle: 4 * slice, type: 'permitted' },
+    //         { startAngle: 4 * slice, endAngle: 5 * slice, type: 'permitted' },
+    //     ]);
+    // })()
+];
+
+class Projectile {
+    constructor() {
+        this.radius = 8;
+        this.y = canvas.height - 50;
+        this.x = canvas.width / 2;
+        this.speed = 7;
+        this.active = false;
+    }
+
+    launch() {
+        this.active = true;
+    }
+
+    update(rings, coreX, coreY) {
+        if (this.active) {
+            this.y -= this.speed;
+
+            // Check collision with ALL rings
+            rings.forEach(ring => {
+                const hitSector = ring.checkCollision(this.x, this.y, coreX, coreY);
+                if (hitSector) {
+                    this.handleCollision(hitSector, ring);
+                }
+            });
+
+            // Reset if it goes off-screen
+            if (this.y < 0) {
+                this.y = canvas.height - 50;
+                this.active = false;
+            }
+        }
+    }
+
+    handleCollision(sector, ring) {
+        if (sector.type === 'forbidden') {
+            console.log("GAME OVER!");
+        } else {
+            const index = ring.sectors.indexOf(sector);
+            if (index > -1) ring.sectors.splice(index, 1);
+            console.log("Sector broken!");
+        }
+        // Reset the ball
+        this.active = false;
+        this.y = canvas.height - 50;
+    }
+
+    draw(ctx) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#c6ec6c';
+        ctx.fill();
+        ctx.closePath();
+    }
+}
+
+const playerBall = new Projectile();
+
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+        playerBall.launch();
+    }
+});
 
 // 2. The Draw Function
 function animate() {
@@ -33,15 +185,14 @@ function animate() {
     ctx.fill();
     ctx.closePath();
 
-    // Draw Ring (a small dot orbiting the core)
-    const dotX = core.x + Math.cos(core.angle) * ring.radius;
-    const dotY = core.y + Math.sin(core.angle) * ring.radius;
+    rings.forEach(ring => {
+        ring.update();
+        ring.draw(ctx, core.x, core.y);
+    });
 
-    ctx.beginPath();
-    ctx.arc(dotX, dotY, 10, 0, Math.PI * 2);
-    ctx.fillStyle = ring.color;
-    ctx.fill();
-    ctx.closePath();
+    // Draw and Update Projectile
+    playerBall.update(rings, core.x, core.y); // Pass the rings and core coords
+    playerBall.draw(ctx);
 
     requestAnimationFrame(animate);
 }
