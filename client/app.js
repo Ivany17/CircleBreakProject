@@ -1,4 +1,8 @@
 let gameState = 'playing';
+let score = 0;
+let startTime = null;   // Час початку гри (коли кулька запущена)
+let elapsedTime = 0;    // Час у секундах
+let timerInterval = null; // Інтервал для оновлення таймера
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -8,6 +12,12 @@ const COLORS = {
     forbidden: '#ff6b6b'
 };
 
+const breakSound = new Audio('break.mp3');       // Звук розбиття сектора
+const gameOverSound = new Audio('gameover.mp3'); // Звук програшу
+const gameWinSound = new Audio('gamewin.mp3');
+gameWinSound.load(); // Примусове завантаження
+gameWinSound.volume = 1.0;
+
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
@@ -16,7 +26,6 @@ const core = {
     y: canvas.height / 2,
     radius: 30,
     color: '#00ffff',
-    angle: 0,
 };
 
 class Ring {
@@ -91,6 +100,36 @@ const rings = [
             { startAngle: 2 * slice, endAngle: 3 * slice, type: 'permitted' },
         ]);
     })(),
+    //     (() => {
+    //     const slice = (Math.PI * 2) / 4;
+    //     return new Ring(160, 0.01, [
+    //         { startAngle: 0 * slice, endAngle: 1 * slice, type: 'permitted' },
+    //         { startAngle: 1 * slice, endAngle: 2 * slice, type: 'forbidden' },
+    //         { startAngle: 2 * slice, endAngle: 3 * slice, type: 'permitted' },
+    //         { startAngle: 3 * slice, endAngle: 4 * slice, type: 'forbidden' },
+    //     ]);
+    // })(),
+    // (() => {
+    //     const slice = (Math.PI * 2) / 5;
+    //     return new Ring(200, -0.005, [
+    //         { startAngle: 0 * slice, endAngle: 1 * slice, type: 'permitted' },
+    //         { startAngle: 1 * slice, endAngle: 2 * slice, type: 'forbidden' },
+    //         { startAngle: 2 * slice, endAngle: 3 * slice, type: 'permitted' },
+    //         { startAngle: 3 * slice, endAngle: 4 * slice, type: 'permitted' },
+    //         { startAngle: 4 * slice, endAngle: 5 * slice, type: 'forbidden' },
+    //     ]);
+    // })(),
+    // (() => {
+    //     const slice = (Math.PI * 2) / 6;
+    //     return new Ring(250, -0.005, [
+    //         { startAngle: 0 * slice, endAngle: 1 * slice, type: 'permitted' },
+    //         { startAngle: 1 * slice, endAngle: 2 * slice, type: 'forbidden' },
+    //         { startAngle: 2 * slice, endAngle: 3 * slice, type: 'permitted' },
+    //         { startAngle: 3 * slice, endAngle: 4 * slice, type: 'forbidden' },
+    //         { startAngle: 4 * slice, endAngle: 5 * slice, type: 'permitted' },
+    //         { startAngle: 5 * slice, endAngle: 6 * slice, type: 'forbidden' },
+    //     ]);
+    // })(),
 ];
 
 class Projectile {
@@ -107,6 +146,15 @@ class Projectile {
         this.active = true;
         this.hasPassedRing = false;
         this.y = canvas.height - 50;
+
+        // ===== ЗАПУСКАЄМО ТАЙМЕР =====
+        if (startTime === null) {
+            startTime = Date.now();
+            // Оновлюємо час кожні 100 мс (для плавності)
+            timerInterval = setInterval(() => {
+                elapsedTime = (Date.now() - startTime) / 1000; // Секунди
+            }, 100);
+        }
     }
 
     update(rings, coreX, coreY, coreRadius) {
@@ -121,8 +169,10 @@ class Projectile {
         const distToCore = Math.sqrt(dxToCore * dxToCore + dyToCore * dyToCore);
 
         if (distToCore < coreRadius + this.radius) {
+            gameWinSound.play(); // <-- ДОДАЄМО ЗВУК ПЕРЕМОГИ ТУТ
             gameState = 'won';
             this.active = false;
+            stopTimer();
             return;
         }
 
@@ -160,15 +210,15 @@ class Projectile {
 
     handleCollision(sector, ring) {
         if (sector.type === 'forbidden') {
+            gameOverSound.play();
             gameState = 'gameOver';
+            stopTimer();
         } else {
             const index = ring.sectors.indexOf(sector);
             if (index > -1) {
                 ring.sectors.splice(index, 1);
-                console.log("Sector broken!");
-                if (checkWinCondition()) {
-                    gameState = 'won';
-                }
+                breakSound.play();
+                score++;
             }
         }
         this.active = false;
@@ -201,8 +251,6 @@ function animate() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (gameState === 'playing') {
-        core.angle += 0.02;
-
         ctx.beginPath();
         ctx.arc(core.x, core.y, core.radius, 0, Math.PI * 2);
         ctx.fillStyle = core.color;
@@ -217,6 +265,20 @@ function animate() {
         playerBall.update(rings, core.x, core.y, core.radius);
         playerBall.draw(ctx);
 
+        // ===== ВІДОБРАЖЕННЯ ОЧОК =====
+        ctx.fillStyle = 'white';
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText('Score: ' + score, 20, 40);
+
+        // ===== ВІДОБРАЖЕННЯ ЧАСУ =====
+        const seconds = Math.floor(elapsedTime);
+        const timeString = seconds + 's';
+        ctx.fillStyle = 'white';
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'right';
+        ctx.fillText('Time: ' + timeString, canvas.width - 20, 40);
+
     } else if (gameState === 'gameOver') {
         ctx.fillStyle = 'white';
         ctx.font = '40px Arial';
@@ -225,6 +287,12 @@ function animate() {
         ctx.font = '20px Arial';
         ctx.fillText("Press R to Restart", canvas.width / 2, canvas.height / 2 + 50);
 
+        // Показуємо фінальний рахунок
+        ctx.fillStyle = 'white';
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Final Score: ' + score, canvas.width / 2, canvas.height / 2 + 100);
+
     } else if (gameState === 'won') {
         ctx.fillStyle = '#c6ec6c';
         ctx.font = '40px Arial';
@@ -232,6 +300,12 @@ function animate() {
         ctx.fillText("YOU WIN!", canvas.width / 2, canvas.height / 2);
         ctx.font = '20px Arial';
         ctx.fillText("Press R to Restart", canvas.width / 2, canvas.height / 2 + 50);
+
+        // Показуємо фінальний рахунок
+        ctx.fillStyle = '#c6ec6c';
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Final Score: ' + score, canvas.width / 2, canvas.height / 2 + 100);
     }
 
     requestAnimationFrame(animate);
@@ -241,8 +315,11 @@ function resetGame() {
     location.reload();
 }
 
-function checkWinCondition() {
-    return rings.every(ring => ring.sectors.length === 0);
+function stopTimer() {
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
 }
 
 animate();
